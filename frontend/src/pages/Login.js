@@ -15,7 +15,7 @@ function Login() {
 
     const handleLogin = (e) => {
         e.preventDefault();
-         axios.post("http://localhost:3000/login", { email, password })
+         axios.post("http://localhost:3002/login", { email, password })
             .then(result => {
                 
                 if (result.data.success) {

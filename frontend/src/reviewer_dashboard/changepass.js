@@ -25,7 +25,7 @@ const ChangePassword = () => {
 
         try {
             setLoading(true);
-            const response = await axios.post('http://localhost:3000/change-password', {
+            const response = await axios.post('http://localhost:3002/change-password', {
                 userId: user._id,
                 oldPassword,
                 newPassword

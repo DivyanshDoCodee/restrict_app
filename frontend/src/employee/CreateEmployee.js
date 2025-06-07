@@ -15,7 +15,7 @@ const EmployeeForm = () => {
   const [success, setSuccess] = useState('');
 
   useEffect(() => {
-    fetch('http://localhost:3000/hods')
+    fetch('http://localhost:3002/hods')
       .then((response) => {
         if (!response.ok) {
           throw new Error('Failed to fetch register');
@@ -45,7 +45,7 @@ const EmployeeForm = () => {
         user_id: selectedUser // Add the selected user (HOD ID) here
 
       };
-      const response = await axios.post('http://localhost:3000/employee', newEmployee);
+      const response = await axios.post('http://localhost:3002/employee', newEmployee);
       Swal.fire({
         title: "Employee Created Successfully",
         // text: "Do you want to proceed with adding this employee?",

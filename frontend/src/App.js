@@ -43,6 +43,7 @@ import UploadExcel from './excel/UploadExcel';
 import ChangePassword from './reviewer_dashboard/changepass';
 import UploadEmployees from './employee/UploadEmployees';
 import UploadHods from './hod/UploadHod';
+import CreateAdmin from './user/CreateAdmin';
 
 function App() {
   
@@ -137,6 +138,11 @@ function App() {
              </ProtectedRoute>
             }></Route>
           <Route path='/create_audit' element={<Audit />}></Route>
+          <Route path='/create_admin' element={
+            <ProtectedRoute>
+              <CreateAdmin />
+            </ProtectedRoute>
+          }></Route>
 
 
         </Routes>

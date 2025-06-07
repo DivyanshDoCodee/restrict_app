@@ -1,8 +1,8 @@
 import React from 'react';
 import Navbar from '../components/Navbar';  // Assuming you have a Navbar component
 import Sidebar from '../components/Sidebar';  // Assuming you have a Sidebar component
-import AuditList from '../audit/AuditList';  // Import the AuditList component
-import PendingAuditList from '../audit/PendingAuditList';
+// import AuditList from '../audit/AuditList';  // Assuming you have a Sidebar component
+// import PendingAuditList from '../audit/PendingAuditList'; // Remove this import
 
 const Dashboard = () => {
   return (
@@ -11,8 +11,9 @@ const Dashboard = () => {
       <div className="content-wrapper">
         <Sidebar />
         <div className="dashboard-container">
-          {/* Add AuditList to the dashboard */}
-          <PendingAuditList/>
+          {/* Content goes here */}
+          <h2>Completed Reviews</h2> {/* Add the title here */}
+          {/* Remove the PendingAuditList component */}
         </div>
       </div>
     </div>

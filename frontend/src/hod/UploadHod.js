@@ -39,7 +39,7 @@ const UploadHod = () => {
         formData.append("file", file);
 
         try {
-            const response = await axios.post("http://localhost:3000/uploadHod", formData, {
+            const response = await axios.post("http://localhost:3002/uploadHods", formData, {
                 headers: { "Content-Type": "multipart/form-data" },
             });
             setMessage(response.data.message);
@@ -57,7 +57,7 @@ const UploadHod = () => {
                 <Sidebar />
                 <div className="dashboard-container">
                     <div className="container mt-5">
-                        <h2 className="mb-3">Upload HODs from Excel</h2>
+                        <h2 className="mb-3">Upload Reviewer from Excel</h2>
                         <div className="mb-3">
                             <input type="file" accept=".xlsx, .xls" onChange={handleFileChange} className="form-control" />
                         </div>

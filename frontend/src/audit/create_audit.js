@@ -31,7 +31,7 @@ const CreateAuditForm = () => {
 
   useEffect(() => {
     // fetch employees
-    fetch('http://localhost:3000/employee')
+    fetch('http://localhost:3002/employee')
       .then((response) => {
         if (!response.ok) {
           throw new Error('Failed to fetch frequencies');
@@ -46,7 +46,7 @@ const CreateAuditForm = () => {
       });
 
     // Fetch frequencies
-    fetch('http://localhost:3000/frequency')
+    fetch('http://localhost:3002/frequency')
       .then((response) => {
         if (!response.ok) {
           throw new Error('Failed to fetch frequencies');
@@ -61,7 +61,7 @@ const CreateAuditForm = () => {
       });
 
     // Fetch users
-    fetch('http://localhost:3000/register')
+    fetch('http://localhost:3002/register')
       .then((response) => {
         if (!response.ok) {
           throw new Error('Failed to fetch users');
@@ -76,7 +76,7 @@ const CreateAuditForm = () => {
       });
 
     // Fetch applications
-    fetch('http://localhost:3000/creating')
+    fetch('http://localhost:3002/creating')
       .then((response) => {
         if (!response.ok) {
           throw new Error('Failed to fetch applications');
@@ -102,7 +102,7 @@ const CreateAuditForm = () => {
     };
 
     try {
-      const response = await axios.post('http://localhost:3000/audit', newAudit);
+      const response = await axios.post('http://localhost:3002/audit', newAudit);
       Swal.fire({
         title: "Review Created Successfully",
         // text: "Do you want to proceed with adding this review?",
@@ -124,18 +124,35 @@ const CreateAuditForm = () => {
 
     const applicationId = e.target.value;
     setApplicationId(applicationId);
-    setSelectedRights("");
-    setAppRights("");
+    setSelectedRights([]); // Clear previously selected rights
+    setAppRights({}); // Clear appRights state before fetching
     try {
-      const response = await axios.get('http://localhost:3000/getApplicationDataForReview', {
+      const response = await axios.get('http://localhost:3002/getApplicationDataForReview', {
         params: { application_id: applicationId }  // Send frequency_id in the query parameters
       });
-      setAppRights(response.data.message.app_rights);
+      
+      const fetchedAppRights = response.data.message.app_rights;
+      let formattedAppRights = {};
+
+      if (fetchedAppRights) {
+          if (typeof fetchedAppRights === 'object' && !Array.isArray(fetchedAppRights)) {
+            // If it's already a nested object
+            formattedAppRights = fetchedAppRights;
+          } else if (Array.isArray(fetchedAppRights)) {
+            // If it's a simple array, put it under a 'default' category
+            formattedAppRights = { 'default': fetchedAppRights };
+          } 
+          // If fetchedAppRights is null, undefined, or other, formattedAppRights remains {} (empty object)
+      }
+
+      setAppRights(formattedAppRights); // Set the state with the formatted object
       setNextAuditDate(response.data.nextAuditDate);
       setError('');  // Clear any previous error
     } catch (err) {
-      setError('Failed to fetch the next audit date' + err);
-      // setNextAuditDate(null);
+      console.error('Failed to fetch application data for review:', err);
+      setError('Failed to fetch application data for review.');
+      setAppRights({}); // Set to empty object on error
+      setNextAuditDate(null);
     }
   };
 
@@ -207,30 +224,57 @@ const CreateAuditForm = () => {
 
 
             <div className="mb-3">
-              <label htmlFor="rights" className="form-label">Inital Rights:</label><br></br>
-              {/*
-          <textarea
-            id="rights"
-            className="form-control"
-            value={rights}
-            onChange={(e) => setRights(e.target.value)}
-          />
-    
-         */}
-              {appRights.length > 0 ? (
-                appRights.map((right, index) => (
-                  <div key={index}>
+              <label htmlFor="rights" className="form-label">Initial Rights:</label><br></br>
+              
+              {appRights && typeof appRights === 'object' && Object.keys(appRights).length > 0 ? (
+                // Iterate over categories if appRights is a non-empty object
+                Object.keys(appRights).map(categoryKey => (
+                  <div key={categoryKey} className="mb-2">
+                    <h6>{categoryKey}</h6> {/* Display category name */}
+                    {Array.isArray(appRights[categoryKey]) && appRights[categoryKey].length > 0 ? (
+                      // Iterate over the array of rights for each category and display checkboxes
+                      appRights[categoryKey].map((right, rightIndex) => (
+                        <div key={`${categoryKey}-${rightIndex}`} className="form-check">
                     <input
+                            className="form-check-input"
                       type="checkbox"
-                      id={`right-${index}`}
-                      name={`right-${right}`}
+                            id={`right-${categoryKey}-${rightIndex}`}
                       value={right}
                       onChange={handleCheckboxChange}
+                            checked={selectedRights.includes(right)} // Check if right is in selectedRights
                     />
-                    &nbsp;
-                    <label htmlFor={`right-${index}`}>{right}</label>
+                          <label className="form-check-label" htmlFor={`right-${categoryKey}-${rightIndex}`}>
+                            {right}
+                          </label>
+                        </div>
+                      ))
+                    ) : (
+                      <small className='text-muted'>No rights in this category</small>
+                    )}
                   </div>
                 ))
+              ) : Array.isArray(appRights) && appRights.length > 0 ? (
+                // Fallback for cases where appRights might still be a simple array
+                 <div className="mb-2">
+                    <h6>Default Category</h6> {/* Display a default category name */}
+                    {appRights.map((right, index) => (
+                      <div key={`default-${index}`} className="form-check">
+                        <input
+                          className="form-check-input"
+                          type="checkbox"
+                          id={`right-default-${index}`}
+                          value={right}
+                          onChange={handleCheckboxChange}
+                          checked={selectedRights.includes(right)} // Check if right is in selectedRights
+                        />
+                        <label className="form-check-label" htmlFor={`right-default-${index}`}>
+                          {right}
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+              ) : (appRights && typeof appRights === 'object' && Object.keys(appRights).length === 0) ? (
+                   <small className='text-muted'>No rights assigned to this application</small>
               ) : (
                 <small className='text-muted'>Select Application First</small>
               )}

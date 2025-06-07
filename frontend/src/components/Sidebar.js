@@ -12,8 +12,8 @@ const Sidebar = () => {
   return (
     <div className="sidebar">
       <ul>
-      <li>
-          <Link to="/dashboard">Dashboard</Link>
+        <li>
+          <Link to="/dashboard">Completed Reviews</Link>
         </li>
         {user.role == "admin" && (
           <li>
@@ -22,17 +22,17 @@ const Sidebar = () => {
         )}
         {user.role == "admin" && (
           <li>
-            <Link to="/employees">Employees</Link>
+            <Link to="/employees">Employees / Reviewer</Link>
           </li>
         )}
-          {user.role == "admin" && (
+        {user.role == "admin" && (
           <li>
             <Link to="/frequency">Frequency</Link>
           </li>
         )}
         {user.role == "admin" && (
           <li>
-            <Link to="/hods">HODs</Link>
+            <Link to="/hods">Reviewers</Link>
           </li>
         )}
         {user.role == "admin" && (
@@ -40,35 +40,47 @@ const Sidebar = () => {
             <Link to="/create_audit">Create Review</Link>
           </li>
         )}
-          <li>
-            <Link to="/pastReviews">Reviews Given</Link>
-          </li>
+        <li>
+          <Link to="/pastReviews">Pending Reviews          </Link>
+        </li>
         {user.role == "admin" && (
           <li>
-            <Link to="/uploadExcel">Upload Audit Excel</Link>
+            <Link to="/uploadExcel">Upload Review Excel</Link>
           </li>
         )}
-         {user.role == "admin" && (
+        {user.role == "admin" && (
           <li>
             <Link to="/uploademployee">Upload Employee </Link>
           </li>
         )}
         {user.role == "admin" && (
           <li>
-            <Link to="/hods">Change Password</Link>
+            <Link to="/hods">Change Password For Admin</Link>
           </li>
         )}
+        {/* {user.role == "admin" && (
+          <li>
+            <Link to="/uploadHod">Upload Reviewer</Link>
+          </li>
+        )} */}
+
+        {/* {user.role == "hod" && (
+          <li>
+            <Link className='text-muted'>My Employees For HOD</Link>
+          </li>
+        )} */}
         {user.role == "hod" && (
           <li>
-            <Link  className='text-muted'>My Employees</Link>
+            <Link to="/change-password">Change Password For HOD</Link>
           </li>
         )}
-        {user.role == "hod" && (
+
+        {user.role === "admin" && (
           <li>
-            <Link to="/change-password">Change Password</Link>
+            <Link to="/create_admin">Add New Admin</Link>
           </li>
         )}
-        
+
       </ul>
     </div>
   );

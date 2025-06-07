@@ -20,7 +20,8 @@ const UploadEmployees = () => {
         reader.onload = (event) => {
             const binaryStr = event.target.result;
             const wb = XLSX.read(binaryStr, { type: "binary" });
-            const ws = wb.Sheets[wb.SheetNames[0]];
+            // const ws = wb.Sheets[wb.SheetNames[0]]; // Reading Sheet 1
+            const ws = wb.Sheets["Sheet2"]; // Reading Sheet 2
             const data = XLSX.utils.sheet_to_json(ws);
             setPreviewData(data);  // Store preview data
         };
@@ -38,7 +39,7 @@ const UploadEmployees = () => {
         formData.append("file", file);
 
         try {
-            const response = await axios.post("http://localhost:3000/uploadEmployees", formData, {
+            const response = await axios.post("http://localhost:3002/uploadEmployees", formData, {
                 headers: { "Content-Type": "multipart/form-data" },
             });
             setMessage(response.data.message);
@@ -49,47 +50,83 @@ const UploadEmployees = () => {
         }
     };
 
+    // Function to download the Excel template
+    const handleDownloadTemplate = () => {
+        const headers = ["Emp Name", "Emp Email", "Reviewer Email", "Role"];
+        // Add a sample data row
+        const sampleData = [" ", " ", " ", "Reviewer, Employee"];
+        
+        // Create a worksheet from headers and sample data
+        const data = [headers, sampleData];
+        const ws = XLSX.utils.aoa_to_sheet(data);
+        
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+        XLSX.writeFile(wb, "EmployeeReviewerTemplate.xlsx");
+    };
+
     return (
         <div className="app">
-        <Navbar />
-        <div className="content-wrapper">
-            <Sidebar />
-            <div className="dashboard-container">
-        <div className="container mt-5">
-            <h2 className="mb-3">Upload Employees from Excel</h2>
-            <div className="mb-3">
-                <input type="file" accept=".xlsx, .xls" onChange={handleFileChange} className="form-control" />
-            </div>
-            <button onClick={handleUpload} className="btn btn-primary mb-3">Upload</button>
-            {message && <p className="alert alert-info">{message}</p>}
+            <Navbar />
+            <div className="content-wrapper">
+                <Sidebar />
+                <div className="dashboard-container">
+                    <div className="container mt-5">
+                        <h2 className="mb-3">Upload Employees from Excel</h2>
 
-            {previewData.length > 0 && (
-                <div className="table-responsive">
-                    <h4>Preview Data:</h4>
-                    <table className="table table-bordered">
-                        <thead className="table-dark">
-                            <tr>
-                                <th>Name</th>
-                                <th>Email</th>
-                                <th>User ID</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {previewData.map((item, index) => (
-                                <tr key={index}>
-                                    <td>{item.Name || "N/A"}</td>
-                                    <td>{item.Email || "N/A"}</td>
-                                    <td>{item.User_ID || "N/A"}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                        {/* Download Template Button */}
+                        <button 
+                            onClick={handleDownloadTemplate} 
+                            className="btn btn-secondary mb-3 me-2"
+                        >
+                            Download Template
+                        </button>
+
+                        <div className="mb-3">
+                            <input type="file" accept=".xlsx, .xls" onChange={handleFileChange} className="form-control" />
+                        </div>
+                        <button onClick={handleUpload} className="btn btn-primary mb-3">Upload</button>
+                        {message && <p className="alert alert-info">{message}</p>}
+
+                        {previewData.length > 0 && (
+                            <div className="table-responsive">
+                                <h4>Preview Data:</h4>
+                                <table className="table table-bordered">
+                                    <thead className="table-dark">
+                                        <tr>
+                                            <th>Emp Name</th>
+                                            <th>Email ID</th>
+                                            <th>HOD</th>
+                                        </tr>
+                                    </thead>
+                                    {/* <tbody>
+                                        {previewData.map((item, index) => (
+                                            <tr key={index}>
+                                                <td>{item.Emp_Name || "N/A"}</td>
+                                                <td>{item.Email_ID || "N/A"}</td>
+                                                <td>{item.HOD || "N/A"}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody> */}
+
+
+                                    <tbody>
+                                        {previewData.map((item, index) => (
+                                            <tr key={index}>
+                                                <td>{item["Emp Name"] || "N/A"}</td>
+                                                <td>{item["Email ID"] || "N/A"}</td>
+                                                <td>{item["HOD"] || "N/A"}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+
+                                </table>
+                            </div>
+                        )}
+                    </div>
                 </div>
-            )}
-        </div>
-        </div>
 
-        </div>
+            </div>
         </div>
 
     );

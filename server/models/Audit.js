@@ -12,6 +12,7 @@ const auditSchema = new Schema({
     reviewer_reviewAt: { type: Date, default: null },
     reviewer_actionTaken: { type: String, default: null },
     reviewer_remarks: { type: String, default: null },
+    excelRightsData: { type: Object, default: {} },
     created_at: { type: Date, default: Date.now },
     deleted_at: { type: Date, default: null },
     status: { type: Boolean, default: true }

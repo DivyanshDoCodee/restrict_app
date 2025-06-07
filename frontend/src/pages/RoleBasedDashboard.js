@@ -9,7 +9,8 @@ const RoleBasedDashboard = () => {
 
   if (!user) return <h2>Loading...</h2>;
 
-  return user.role === "admin" ? <Dashboard /> : <Reviewer />;
+  // Render the Reviewer dashboard for admin or hod roles
+  return user.role === "admin" || user.role === "hod" ? <Reviewer /> : null;
 };
 
 export default RoleBasedDashboard;

@@ -6,30 +6,72 @@ import Sidebar from '../components/Sidebar';
 const EmployeeIndex = () => {
   const [employees, setEmployees] = useState([]);
   const [error, setError] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState(null);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    email: ''
+  });
 
   // Fetch employees data from the backend
   const fetchEmployees = async () => {
     try {
-      const response = await axios.get('http://localhost:3000/employee');
+      const response = await axios.get('http://localhost:3002/employee');
       setEmployees(response.data);
     } catch (err) {
       setError('Error fetching employee data.');
     }
   };
 
-  // Update employee status to 1 (mark as deleted)
-  const updateStatus = (id) => {
-    axios.put(`http://localhost:3000/employee/${id}`, { status: 1 })
-      .then(response => {
-        // Update the local employee list to reflect the change
+  // Update employee status (true: Enabled, false: Disabled)
+  const updateStatus = async (id, status) => {
+    try {
+      const response = await axios.put(`http://localhost:3002/employee/${id}`, { status });
+      if (response.data) {
+        // Update the local state with the new status
+        setEmployees(prevEmployees => 
+          prevEmployees.map(employee => 
+            employee._id === id ? { ...employee, status: status } : employee
+          )
+        );
+      }
+    } catch (err) {
+      console.error('Error updating status:', err);
+      setError('Failed to update employee status. Please try again.');
+    }
+  };
+
+  // Handle edit button click
+  const handleEditClick = (employee) => {
+    setEditingEmployee(employee);
+    setEditForm({
+      name: employee.name,
+      email: employee.email
+    });
+    setShowModal(true);
+  };
+
+  // Handle form input changes
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setEditForm(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  // Handle form submission
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const response = await axios.put(`http://localhost:3002/employee/${editingEmployee._id}`, editForm);
         setEmployees(employees.map(employee => 
-          employee._id === id ? { ...employee, status: 1 } : employee
-
-        ));
-        window.location.reload();
-
-      })
-      .catch(err => console.error(err));
+        employee._id === editingEmployee._id ? { ...employee, ...editForm } : employee
+      ));
+      setShowModal(false);
+    } catch (err) {
+      setError('Error updating employee details.');
+    }
   };
 
   // Fetch employees when the component mounts
@@ -43,7 +85,7 @@ const EmployeeIndex = () => {
       <div className="content-wrapper">
         <Sidebar />
         <div className="container mt-5">
-          <h2>Employee List</h2>
+          <h2>Employee / Reviewer List</h2>
           <a href='/employeescreate'>
             <button className='btn btn-md btn-primary'>Create New Employee</button>
           </a>
@@ -56,14 +98,15 @@ const EmployeeIndex = () => {
               <tr>
                 <th>Name</th>
                 <th>Email</th>
-                <th>HOD NAME</th>
+                <th>Reviewer NAME</th>
+                <th>Status</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
               {employees.length === 0 ? (
                 <tr>
-                  <td colSpan="4" className="text-center">No employees found</td>
+                  <td colSpan="5" className="text-center">No employees found</td>
                 </tr>
               ) : (
                 employees.map((employee) => (
@@ -71,11 +114,27 @@ const EmployeeIndex = () => {
                     <td>{employee.name}</td>
                     <td>{employee.email}</td>
                     <td>{employee.user_id?.name}</td>
+                    <td>{employee.status === false ? 'Disabled' : 'Enabled'}</td>
                     <td>
-                      {/* Only show the "Mark as Deleted" button if status is null */}
-                      {employee.status === null && (
-                        <button onClick={() => updateStatus(employee._id)}>
-                     Delete
+                      <button 
+                        className='btn btn-sm btn-info me-2'
+                        onClick={() => handleEditClick(employee)}
+                      >
+                        Modify
+                      </button>
+                      {employee.status === true ? (
+                        <button 
+                          className='btn btn-sm btn-danger'
+                          onClick={() => updateStatus(employee._id, false)}
+                        >
+                          Disable
+                        </button>
+                      ) : (
+                        <button 
+                          className='btn btn-sm btn-success'
+                          onClick={() => updateStatus(employee._id, true)}
+                        >
+                          Enable
                         </button>
                       )}
                     </td>
@@ -86,6 +145,58 @@ const EmployeeIndex = () => {
           </table>
         </div>
       </div>
+
+      {/* Edit Modal */}
+      {showModal && (
+        <div className="modal" style={{ display: 'block', backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">Edit Employee</h5>
+                <button 
+                  type="button" 
+                  className="btn-close" 
+                  onClick={() => setShowModal(false)}
+                ></button>
+              </div>
+              <div className="modal-body">
+                <form onSubmit={handleSubmit}>
+                  <div className="mb-3">
+                    <label className="form-label">Name</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      name="name"
+                      value={editForm.name}
+                      onChange={handleInputChange}
+                      required
+                    />
+                  </div>
+                  <div className="mb-3">
+                    <label className="form-label">Email</label>
+                    <input
+                      type="email"
+                      className="form-control"
+                      name="email"
+                      value={editForm.email}
+                      onChange={handleInputChange}
+                      required
+                    />
+                  </div>
+                  <div className="modal-footer">
+                    <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>
+                      Close
+                    </button>
+                    <button type="submit" className="btn btn-primary">
+                      Save Changes
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

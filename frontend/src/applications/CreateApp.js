@@ -18,9 +18,10 @@ const CreateApp = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState('');
+  const [adminEmail, setAdminEmail] = useState(''); // New state for admin email
 
 useEffect(() => {
-  fetch('http://localhost:3000/frequency')
+  fetch('http://localhost:3002/frequency')
     .then((response) => {
       if (!response.ok) {
         throw new Error('Failed to fetch frequencies');
@@ -43,7 +44,7 @@ const handleFrequencyChange = async (e) => {
   setSelectedFrequency(frequencyId);
 
   try {
-    const response = await axios.get('http://localhost:3000/getNextAuditDate',{
+    const response = await axios.get('http://localhost:3002/getNextAuditDate',{
       params: { frequency_id: frequencyId }  // Send frequency_id in the query parameters
     });
     setNextAuditDate(response.data.message);  // Set the next audit date from the API response
@@ -65,11 +66,12 @@ const handleFrequencyChange = async (e) => {
       // status,
       frequency_id: selectedFrequency, // Save the selected frequency ID as referenc
       desc,
-      app_rights: appRights.filter(right => right.trim() !== '')  // Remove empty inputs
+      app_rights: appRights.filter(right => right.trim() !== ''),  // Remove empty inputs
+      adminEmail // Add admin email to the data being sent
     };
 
     try {
-      const response = await axios.post('http://localhost:3000/createApplication', newUser);
+      const response = await axios.post('http://localhost:3002/createApplication', newUser);
 
       Swal.fire({
         title: "Application Created Successfullly",
@@ -125,6 +127,18 @@ const handleFrequencyChange = async (e) => {
                 className="form-control"
                 value={appName}
                 onChange={(e) => setAppName(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="mb-3">
+              <label htmlFor="adminEmail" className="form-label">Application Admin Email</label>
+              <input
+                type="email"
+                id="adminEmail"
+                className="form-control"
+                value={adminEmail}
+                onChange={(e) => setAdminEmail(e.target.value)}
                 required
               />
             </div>
