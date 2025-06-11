@@ -17,6 +17,8 @@ const AuditList = () => {
   const [editedRights, setEditedRights] = useState({}); // State to store edited rights values (original rights edit state)
   const [isSaving, setIsSaving] = useState(false); // State to track saving status (original rights edit state)
   const [mandatoryRemarksAuditIds, setMandatoryRemarksAuditIds] = useState([]); // New state to track audits where remarks are mandatory
+  const [reviewCompleted, setReviewCompleted] = useState({}); // { [auditId]: boolean }
+  const [selectedActions, setSelectedActions] = useState({});
 
   // Handler for modify button (now primarily for making remarks mandatory)
   const handleModify = (auditId) => {
@@ -94,6 +96,11 @@ const AuditList = () => {
 
   // Handler for submit button
   const handleSubmit = async (auditId) => {
+    // Validate review completed checkbox
+    if (!reviewCompleted[auditId]) {
+      setError('Please check the Review Completed box before submitting.');
+      return;
+    }
     try {
       // Get the remark value from the textarea
       const remarkTextarea = document.querySelector(`textarea[data-audit-id='${auditId}']`);
@@ -102,34 +109,26 @@ const AuditList = () => {
       // Check if remarks are mandatory for this audit and if the field is empty
       if (mandatoryRemarksAuditIds.includes(auditId) && remark.trim() === '') {
         alert('Reviewer Remarks are mandatory for this submission.');
-        // You can add visual indication here, like changing the border color of the textarea
         remarkTextarea.style.borderColor = 'red';
         return;
       }
-
-      // Reset border color if validation passes
       remarkTextarea.style.borderColor = '';
 
-      // Get the selected radio button value
-      const selectedAction = document.querySelector(`input[name="action-${auditId}"]:checked`)?.value;
+      // Get the selected action from state
+      const selectedAction = selectedActions[auditId];
       if (!selectedAction) {
-        alert('Please select an action (Revoke or Retain).');
+        alert('Please select an action (Revoke, Retain, or Modify).');
         return;
       }
 
       const audit = audits.find(a => a._id === auditId);
       if (!audit || !audit.emp_id || !audit.application_id) {
-        console.error('Audit data is incomplete for drafting email.', audit);
-        alert('Unable to draft email due to missing information.');
+        console.error('Audit data is incomplete for submission.', audit);
+        alert('Unable to submit review due to missing information.');
         return;
       }
 
-      const employeeName = audit.emp_id.name;
-      const adminEmail = audit.application_id.adminEmail;
-      // Use the selected action text
-      const actionText = selectedAction === 'revoke' ? 'Revoked' : 'Retained';
-
-      // Format the rights data from excelRightsData (keeping this for context in the email if needed)
+      // Gather rights data
       let rightsDetails = '';
       if (audit.excelRightsData && typeof audit.excelRightsData === 'object') {
         for (const category in audit.excelRightsData) {
@@ -142,36 +141,38 @@ const AuditList = () => {
         }
       }
 
-      // Make API call to send notification
-      const response = await axios.post('http://localhost:3002/sendReviewNotification', {
-        auditId: auditId,
-        selectedAction: selectedAction, // Send the selected action
-        remark: remark, // Send the remark
-        employeeName: employeeName,
-        adminEmail: adminEmail,
-        rightsDetails: rightsDetails,
-        reviewerName: user.name // Assuming user object is available and has a name property
+      // Log the request payload for debugging
+      const payload = {
+        auditID: auditId,
+        remark,
+        rights: audit.excelRightsData || {},
+        reviewer: user._id,
+        reviewerName: user.name,
+        emp: audit.emp_id._id,
+        app: audit.application_id._id,
+        action: selectedAction
+      };
+      console.log('Submitting review:', payload);
+
+      // Call /submitReview to save the completed review
+      await axios.post('http://localhost:3002/submitReview', payload);
+
+      Swal.fire({
+        title: "Review marked as completed!",
+        icon: "success",
+        timer: 1200,
+        showConfirmButton: false
       });
-
-      if (response.data.success) {
-        Swal.fire({
-          title: "Review Action Recorded and Notification Sent",
-          icon: "success",
-        }).then((result) => {
-          // Optionally refresh the page or update the state
-          window.location.reload();
-        });
-      } else {
-        Swal.fire({
-          title: "Error",
-          text: response.data.message || "Failed to send review notification.",
-          icon: "error",
-        });
-      }
-
+      // Optionally remove from audits list or refresh
+      setAudits(prev => prev.filter(a => a._id !== auditId));
     } catch (error) {
       console.error('Error handling submit:', error);
-      setError('Failed to process the action');
+      if (error.response && error.response.data && error.response.data.message) {
+        setError(error.response.data.message);
+        alert(error.response.data.message);
+      } else {
+        setError('Failed to process the action');
+      }
     }
   };
 
@@ -179,107 +180,51 @@ const AuditList = () => {
   useEffect(() => {
     const fetchAudits = async () => {
       try {
-        let param = { user: user._id };
-        if(user.role === "admin"){
-          param = {user: "admin"};
-        }
-        
-        if (selectedApplication !== 'All') {
-          param.application = selectedApplication;
-        }
+        // Normalize the user's email for comparison
+        const normalizedUserEmail = user?.email?.trim().toLowerCase();
+        console.log('Fetching audits for user:', normalizedUserEmail); // Add logging
 
         const response = await axios.get('http://localhost:3002/pastAudits', {
-          params: param
-        });
-
-        const fetchedAudits = response.data; // Get the fetched audits
-        console.log('Fetched audits data:', fetchedAudits); // Log the fetched data
-        setError(''); // Clear error on successful fetch
-
-        // Process audits to fetch employee names if not populated
-        const processedAudits = await Promise.all(fetchedAudits.map(async audit => {
-          // Check if emp_id is not a populated object with a name
-          if (audit.emp_id && typeof audit.emp_id !== 'object') {
-            try {
-              // Fetch employee details separately by ID
-              const empResponse = await axios.get(`http://localhost:3002/employee/${audit.emp_id}`);
-              // If employee found, update the audit object with populated emp_id
-              if (empResponse.data) {
-                return { ...audit, emp_id: empResponse.data }; // Replace ID with the employee object
-              }
-            } catch (empError) {
-              console.error(`Error fetching employee details for ID ${audit.emp_id}:`, empError);
-              // Keep the original audit if fetching fails
-            }
-          }
-          return audit; // Return original audit if already populated or fetching failed
-        }));
-
-        setAudits(processedAudits); // Set the state with processed audits
-
-        // Collect unique individual rights from app_rights and additional 'rights' headers from excelRightsData
-        const combinedRightsHeaders = new Set();
-
-        processedAudits.forEach(audit => {
-          // Check if the audit's application matches the selected filter
-          if (selectedApplication === 'All' || (audit.application_id && audit.application_id._id === selectedApplication)) {
-
-            // 1. Add headers from user-defined app_rights
-            const userDefinedRights = new Set();
-            if (audit.application_id?.app_rights && typeof audit.application_id.app_rights === 'object') {
-              Object.values(audit.application_id.app_rights).forEach(rightsArray => {
-                if (Array.isArray(rightsArray)) {
-                  rightsArray.forEach(right => {
-                     if (typeof right === 'string' && right.trim() !== '') {
-                         userDefinedRights.add(right.trim());
-                         combinedRightsHeaders.add(right.trim()); // Add to combined set
-                     }
-                  });
-                } else if (typeof rightsArray === 'string' && rightsArray.trim() !== '') {
-                     userDefinedRights.add(rightsArray.trim());
-                     combinedRightsHeaders.add(rightsArray.trim()); // Add to combined set
-                }
-              });
-            } else if (Array.isArray(audit.application_id?.app_rights)) {
-                audit.application_id.app_rights.forEach(right => {
-                    if (typeof right === 'string' && right.trim() !== '') {
-                        userDefinedRights.add(right.trim());
-                        combinedRightsHeaders.add(right.trim()); // Add to combined set
-                    }
-                });
-            }
-
-            // 2. Add headers from excelRightsData that contain 'rights' and are not already in userDefinedRights
-            if (audit.excelRightsData && typeof audit.excelRightsData === 'object') {
-              Object.keys(audit.excelRightsData).forEach(excelHeader => {
-                if (excelHeader.toLowerCase().includes('rights')) {
-                  // Add to combined set only if it's not a user-defined right
-                  if (!userDefinedRights.has(excelHeader.trim())) {
-                      combinedRightsHeaders.add(excelHeader.trim());
-                  }
-                }
-              });
-            } else if (Array.isArray(audit.excelRightsData)) {
-               // If excelRightsData is a simple array, we might need a convention (e.g., 'default' or a specific header)
-               // For now, we'll assume simple arrays are covered by user-defined rights or require specific handling if they represent other 'rights' columns.
-               // If there's a case where a simple array in excelRightsData corresponds to a general 'rights' column not in app_rights, 
-               // additional logic would be needed here to assign it a header name for combinedRightsHeaders.
-            }
+          params: {
+            user: user?.role === 'admin' ? 'admin' : user?._id,
+            application: selectedApplication
           }
         });
 
-        setDisplayedRightsCategories(Array.from(combinedRightsHeaders)); // Set the state with combined unique headers
+        // Filter audits based on normalized email comparison
+        const filteredAudits = response.data.filter(audit => {
+          if (user?.role === 'admin') return true;
+          
+          const auditHodEmail = audit.user_id?.email?.trim().toLowerCase();
+          const isAssignedToHod = auditHodEmail === normalizedUserEmail;
+          
+          console.log(`Audit HOD email: ${auditHodEmail}, Matches user: ${isAssignedToHod}`); // Add logging
+          
+          return isAssignedToHod && audit.status === true;
+        });
+
+        console.log('Filtered audits:', filteredAudits); // Add logging
+        setAudits(filteredAudits);
+
+        // Extract unique rights categories from all audits
+        const categories = new Set();
+        filteredAudits.forEach(audit => {
+          if (audit.excelRightsData) {
+            Object.keys(audit.excelRightsData).forEach(category => {
+              categories.add(category);
+            });
+          }
+        });
+        setDisplayedRightsCategories(Array.from(categories));
 
       } catch (err) {
-        setError('Failed to fetch audits');
         console.error('Error fetching audits:', err);
-        setAudits([]); // Clear audits on error
-        setDisplayedRightsCategories([]); // Clear categories on error
+        setError('Failed to fetch audits');
       }
     };
 
     fetchAudits();
-  }, [selectedApplication, user]); // Depend on selectedApplication and user
+  }, [user, selectedApplication]);
 
   // Fetch all applications (only for the filter dropdown, not for category headers)
   useEffect(() => {
@@ -303,40 +248,20 @@ const AuditList = () => {
    * Highlights user-defined rights in red if not found in excel.
    */
   const renderRightsCell = (audit, category, applications) => {
-    // Find the application for the current audit
-    const currentAuditApp = applications.find(app => app._id === audit.application_id?._id);
-
-    // Check if the current category (column header) is a user-defined right for this application
-    let isUserDefinedRight = false;
-    if (currentAuditApp?.app_rights && typeof currentAuditApp.app_rights === 'object') {
-        Object.values(currentAuditApp.app_rights).forEach(rightsArray => {
-            if(Array.isArray(rightsArray) && rightsArray.includes(category)) {
-                isUserDefinedRight = true;
-            } else if (rightsArray === category) {
-                isUserDefinedRight = true;
-            }
-        });
-    } else if (Array.isArray(currentAuditApp?.app_rights) && currentAuditApp.app_rights.includes(category)){
-        isUserDefinedRight = true;
+    // Get the rights data from the audit
+    const rightsData = audit.excelRightsData || {};
+    
+    // If the category exists in the rights data, display it
+    if (rightsData.hasOwnProperty(category)) {
+      const value = rightsData[category];
+      // Handle both array and string values
+      if (Array.isArray(value)) {
+        return value.join(', ');
+      }
+      return value;
     }
-
-    // Check if the category exists as a key in the audit's excelRightsData
-    const excelValue = audit.excelRightsData && typeof audit.excelRightsData === 'object' && audit.excelRightsData.hasOwnProperty(category)
-                       ? audit.excelRightsData[category]
-                       : undefined;
-
-    // Logic to display based on whether it's a user-defined right or an additional excel header
-    if (isUserDefinedRight) {
-        if (excelValue !== undefined) {
-            return Array.isArray(excelValue) ? excelValue.join(', ') : excelValue;
-        } else {
-            return <span>-</span>;
-        }
-    } else if (excelValue !== undefined) {
-        return Array.isArray(excelValue) ? excelValue.join(', ') : excelValue;
-    } else {
-        return '-';
-    }
+    
+    return '-';
   };
 
   return (
@@ -347,11 +272,9 @@ const AuditList = () => {
         <div className="dashboard-container">
           <div className="container mt-5">
             <h2>Pending Reviews</h2>
-
             {/* Filter Section */}
             <div className="filter-section mb-3">
               <h5>Filter By Application</h5>
-              
               {applications.map((app) => (
                 <div key={app._id} className="form-check form-check-inline">
                   <input
@@ -369,9 +292,7 @@ const AuditList = () => {
                 </div>
               ))}
             </div>
-
             {error && <p className="text-danger">{error}</p>}
-
             <table className="table">
               <thead>
                 <tr>
@@ -389,54 +310,82 @@ const AuditList = () => {
               <tbody>
                 {audits.length > 0 ? (
                   audits.map((audit) => (
-                    <tr key={audit._id}> {/* Ensure no extra whitespace around tr */}
-                      <td> {/* Display employee name if populated, otherwise N/A */}
-                        {/* Check if emp_id is a populated object with a name */}
+                    <tr key={audit._id}>
+                      <td>
                         {audit.emp_id && typeof audit.emp_id === 'object' && audit.emp_id.name 
                           ? audit.emp_id.name
-                          : 'N/A' // Display N/A if emp_id is null, not an object, or object without name
-                        }
+                          : 'N/A'}
                       </td>
-                      {/* Display rights under dynamic columns */}
                       {displayedRightsCategories.map(category => (
-                        <td key={category}> {/* Use category as key for td */}
-                          {renderRightsCell(audit, category, applications)}
-                        </td>
+                        <td key={category}>{renderRightsCell(audit, category, applications)}</td>
                       ))}
-                      <td> {/* Ensure no extra whitespace around td */}
-                        {/* Add label and conditional asterisk for mandatory remarks */}
+                      <td>
                         <label htmlFor={`remarks-${audit._id}`}> {mandatoryRemarksAuditIds.includes(audit._id) && <span className="text-danger">*</span>}</label>
                         <textarea placeholder='Comments' className='form-control'
-                          id={`remarks-${audit._id}`} // Add an id for the label to reference
-                          data-audit-id={audit._id} // Add data-audit-id to easily select the textarea
-                          defaultValue={audit.reviewer_remarks || ""} // Use empty string for default if no remarks exist
-                          ></textarea>
+                          id={`remarks-${audit._id}`}
+                          data-audit-id={audit._id}
+                          defaultValue={audit.reviewer_remarks || ""}
+                        ></textarea>
                       </td>
                       <td>
                         <div className="d-flex flex-column gap-2">
                           <div className="form-check">
-                            <input className="form-check-input" type="radio" name={`action-${audit._id}`} id={`revoke-${audit._id}`} value="revoke" />
-                            <label className="form-check-label" htmlFor={`revoke-${audit._id}`}>
-                              Revoke
-                            </label>
+                            <input
+                              className="form-check-input"
+                              type="radio"
+                              name={`action-${audit._id}`}
+                              id={`revoke-${audit._id}`}
+                              value="revoke"
+                              checked={selectedActions[audit._id] === 'revoke'}
+                              onChange={() => {
+                                setSelectedActions(prev => ({ ...prev, [audit._id]: 'revoke' }));
+                                setMandatoryRemarksAuditIds(prev => prev.filter(id => id !== audit._id));
+                              }}
+                            />
+                            <label className="form-check-label" htmlFor={`revoke-${audit._id}`}>Revoke</label>
                           </div>
                           <div className="form-check">
-                            <input className="form-check-input" type="radio" name={`action-${audit._id}`} id={`retain-${audit._id}`} value="retain" />
-                            <label className="form-check-label" htmlFor={`retain-${audit._id}`}>
-                              Retain
-                            </label>
+                            <input
+                              className="form-check-input"
+                              type="radio"
+                              name={`action-${audit._id}`}
+                              id={`retain-${audit._id}`}
+                              value="retain"
+                              checked={selectedActions[audit._id] === 'retain'}
+                              onChange={() => {
+                                setSelectedActions(prev => ({ ...prev, [audit._id]: 'retain' }));
+                                setMandatoryRemarksAuditIds(prev => prev.filter(id => id !== audit._id));
+                              }}
+                            />
+                            <label className="form-check-label" htmlFor={`retain-${audit._id}`}>Retain</label>
                           </div>
-                          {/* Add back the Modify button */}
-                          {!mandatoryRemarksAuditIds.includes(audit._id) && (
-                            <button 
-                              className="btn btn-primary btn-sm" 
-                              onClick={() => handleModify(audit._id)}
-                            >
-                              Modify
-                            </button>
-                          )}
+                          <div className="form-check mt-2">
+                            <input
+                              className="form-check-input"
+                              type="radio"
+                              name={`action-${audit._id}`}
+                              id={`modify-${audit._id}`}
+                              value="modify"
+                              checked={selectedActions[audit._id] === 'modify'}
+                              onChange={() => {
+                                setSelectedActions(prev => ({ ...prev, [audit._id]: 'modify' }));
+                                handleModify(audit._id);
+                              }}
+                            />
+                            <label className="form-check-label" htmlFor={`modify-${audit._id}`}>Modify</label>
+                          </div>
+                          <div className="form-check mt-2">
+                            <input
+                              className="form-check-input"
+                              type="checkbox"
+                              id={`review-completed-${audit._id}`}
+                              checked={!!reviewCompleted[audit._id]}
+                              onChange={e => setReviewCompleted(prev => ({ ...prev, [audit._id]: e.target.checked }))}
+                            />
+                            <label className="form-check-label" htmlFor={`review-completed-${audit._id}`}><span className="text-danger">*</span>Review Completed  </label>
+                          </div>
                           <button 
-                            className="btn btn-secondary btn-sm" 
+                            className="btn btn-secondary btn-sm mt-2" 
                             onClick={() => handleSubmit(audit._id)}
                           >
                             Submit
@@ -446,13 +395,12 @@ const AuditList = () => {
                     </tr>
                   ))
                 ) : (
-                  <tr> {/* Ensure no extra whitespace around tr */}
-                    <td colSpan={2 + displayedRightsCategories.length} className="text-center">No audits found</td> {/* Adjust colspan, ensure no extra whitespace */}
+                  <tr>
+                    <td colSpan="5">No audits found</td>
                   </tr>
                 )}
               </tbody>
             </table>
-
           </div>
         </div>
       </div>

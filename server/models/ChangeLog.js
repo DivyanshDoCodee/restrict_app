@@ -11,4 +11,4 @@ const ChangeLogSchema = new mongoose.Schema({
 
 const ChangeLogModel = mongoose.model('ChangeLog', ChangeLogSchema);
 
-module.exports = ChangeLogModel; 
+module.exports = ChangeLogModel;

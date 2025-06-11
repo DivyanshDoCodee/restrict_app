@@ -26,7 +26,12 @@ const EmployeeIndex = () => {
   // Update employee status (true: Enabled, false: Disabled)
   const updateStatus = async (id, status) => {
     try {
-      const response = await axios.put(`http://localhost:3002/employee/${id}`, { status });
+      const token = localStorage.getItem('token');
+      const response = await axios.put(`http://localhost:3002/employee/${id}`, { status }, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
       if (response.data) {
         // Update the local state with the new status
         setEmployees(prevEmployees => 
@@ -64,8 +69,13 @@ const EmployeeIndex = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const response = await axios.put(`http://localhost:3002/employee/${editingEmployee._id}`, editForm);
-        setEmployees(employees.map(employee => 
+      const token = localStorage.getItem('token');
+      const response = await axios.put(`http://localhost:3002/employee/${editingEmployee._id}`, editForm, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      setEmployees(employees.map(employee => 
         employee._id === editingEmployee._id ? { ...employee, ...editForm } : employee
       ));
       setShowModal(false);

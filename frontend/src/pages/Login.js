@@ -19,7 +19,7 @@ function Login() {
             .then(result => {
                 
                 if (result.data.success) {
-                    
+                    localStorage.setItem('token', result.data.token); // Store JWT token
                     login(result.data.user);
                     navigate("/dashboard"); // Redirect after successful login
                 } else {

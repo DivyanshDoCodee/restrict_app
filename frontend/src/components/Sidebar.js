@@ -12,9 +12,7 @@ const Sidebar = () => {
   return (
     <div className="sidebar">
       <ul>
-        <li>
-          <Link to="/dashboard">Completed Reviews</Link>
-        </li>
+
         {user.role == "admin" && (
           <li>
             <Link to="/app">Applications</Link>
@@ -43,6 +41,11 @@ const Sidebar = () => {
         <li>
           <Link to="/pastReviews">Pending Reviews          </Link>
         </li>
+
+        <li>
+          <Link to="/dashboard">Completed Reviews</Link>
+        </li>
+        
         {user.role == "admin" && (
           <li>
             <Link to="/uploadExcel">Upload Review Excel</Link>

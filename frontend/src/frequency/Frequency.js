@@ -89,7 +89,16 @@ const FrequencyIndex = () => {
 
     try {
       // Call backend update endpoint (will implement this next)
-      await axios.put(`http://localhost:3002/frequency/${currentFrequency._id}`, editFormData);
+      const token = localStorage.getItem('token');
+      await axios.put(
+        `http://localhost:3002/frequency/${currentFrequency._id}`,
+        editFormData,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
       Swal.fire(
         'Updated!',
         'The frequency has been updated.',

@@ -26,7 +26,11 @@ const AddUser = () => {
     };
 
     try {
-      const response = await axios.post('http://localhost:3002/register', newUser);
+      const response = await axios.post('http://localhost:3002/register', newUser, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        }
+      });
       Swal.fire({
         title: "HOD Created Successfully",
         // text: "Do you want to proceed with adding this HOD?",

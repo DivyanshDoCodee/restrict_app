@@ -155,75 +155,27 @@ function UploadExcel() {
         setReport([]);
 
         try {
-            // 1. Fetch required rights for the selected application
-            const appResponse = await axios.get(`http://localhost:3002/getApplicationDataForReview`, {
-                params: { application_id: selectedApplication }
-            });
-            const requiredRights = appResponse.data.message?.app_rights; // Assuming app_rights is nested like this
+            // Get all unique column headers from the Excel data (excluding standard columns)
+            const standardColumns = ['Emp Name', 'Email ID', 'HOD', 'Application'];
+            const excelHeaders = Object.keys(previewData[0] || {}).filter(header => !standardColumns.includes(header));
 
-            if (!requiredRights) {
-                setMessage("Could not fetch required rights for the selected application.");
-                setIsLoading(false);
-                return;
-            }
-
-            // Flatten the required rights from nested objects/arrays into a single set of strings
-            const flattenedRequiredRights = new Set();
-            if (requiredRights && typeof requiredRights === 'object') {
-              Object.values(requiredRights).forEach(rightsArray => {
-                if (Array.isArray(rightsArray)) {
-                  rightsArray.forEach(right => {
-                     if (typeof right === 'string' && right.trim() !== '') {
-                        flattenedRequiredRights.add(right.trim());
-                     }
-                  });
-                } else if (typeof rightsArray === 'string' && rightsArray.trim() !== '') {
-                    flattenedRequiredRights.add(rightsArray.trim());
-                }
-              });
-            } else if (Array.isArray(requiredRights)) {
-                 requiredRights.forEach(right => {
-                    if (typeof right === 'string' && right.trim() !== '') {
-                        flattenedRequiredRights.add(right.trim());
-                    }
-                });
-            }
-
-
-            // 2. Get headers from the Excel data
-            const excelHeaders = new Set(Object.keys(previewData[0] || {}));
-
-            // 3. Check if all required rights are present in Excel headers
-            const missingRights = [];
-            flattenedRequiredRights.forEach(requiredRight => {
-                if (!excelHeaders.has(requiredRight)) {
-                    missingRights.push(requiredRight);
-                }
-            });
-
-            // 4. If there are missing rights, show error and stop
-            if (missingRights.length > 0) {
-                setMessage(`The following required rights are missing in the Excel sheet: ${missingRights.join(', ')}`);
-                setIsLoading(false);
-                return;
-            }
-
-            // 5. If all rights are present, proceed with upload
+            // Process the data
             const response = await axios.post('http://localhost:3002/excelUpload', previewData, {
                 headers: {
                     'Content-Type': 'application/json',
                 },
             });
-            
-            console.log(response.data);
-            setReport(response.data);
-            setPreviewData([]);
-            setSelectedFile(null);
-            setMessage("Upload complete.");
 
+            if (response.data.errors && response.data.errors.length > 0) {
+                setMessage(`Upload completed with ${response.data.errors.length} errors.`);
+                setReport(response.data.errors);
+            } else {
+                setMessage("Upload completed successfully!");
+                setReport(response.data.processedEmployees || []);
+            }
         } catch (error) {
-            console.error('Error sending data to backend:', error);
-            setMessage('Error during upload.' + (error.response?.data?.message || error.message));
+            console.error('Upload error:', error);
+            setMessage(error.response?.data?.message || "Error uploading file. Please try again.");
         } finally {
             setIsLoading(false);
         }

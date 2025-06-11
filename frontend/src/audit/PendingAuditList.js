@@ -10,6 +10,9 @@ const PendingAuditList = () => {
   const [audits, setAudits] = useState([]);
   const [error, setError] = useState('');
   const [rights_about_to_give, setrights_about_to_give] = useState('');
+  const [submitting, setSubmitting] = useState({}); // { [auditId]: boolean }
+  const [submitError, setSubmitError] = useState({}); // { [auditId]: string }
+  const [reviewCompleted, setReviewCompleted] = useState({}); // { [auditId]: boolean }
 
   useEffect(() => {
     // Fetch all audits
@@ -37,71 +40,74 @@ const PendingAuditList = () => {
   console.log("Audits state:", audits); // Log audits state before return
 
   const giveReview = async (e, auditId) => {
-
     e.preventDefault();
+    if (submitting[auditId]) return; // Prevent double submission
+    setSubmitError(prev => ({ ...prev, [auditId]: '' }));
 
-    const rowParent = e.target.closest('tr');
-    const checkboxes = rowParent.querySelectorAll('input[type="checkbox"]');
+    // Validate review completed checkbox
+    if (!reviewCompleted[auditId]) {
+      setSubmitError(prev => ({ ...prev, [auditId]: 'Please check the Review Completed box before submitting.' }));
+      return;
+    }
 
-    // Create an empty object to store the rights
-    let updatedRights = {};
-    let audit_id;
-    updatedRights["rights"] = {};
-    // Loop through each checkbox and check if it's checked
-    Array.from(checkboxes).forEach((checkbox) => {
-      if (checkbox.checked) {
-        const selected = checkbox.dataset.name;
-        // Strip the "right-" prefix and extract the object ID
-        const strippedName = selected.replace("right-", "");
-        const [objectId] = strippedName.split('-'); // Assuming the ID is before the first hyphen
-        audit_id = strippedName;
-        // Create the object for this checkbox and add it to the updatedRights object
-        updatedRights["rights"][objectId] = {
-          checked: true
-        };
+    // Validate action
+    const selectedAction = document.querySelector(`input[name="action-${auditId}"]:checked`)?.value;
+    if (!selectedAction) {
+      setSubmitError(prev => ({ ...prev, [auditId]: 'Please select Revoke or Retain.' }));
+      return;
+    }
+
+    setSubmitting(prev => ({ ...prev, [auditId]: true }));
+    try {
+      const rowParent = e.target.closest('tr');
+      const checkboxes = rowParent.querySelectorAll('input[type="checkbox"]');
+      let updatedRights = {};
+      let audit_id;
+      updatedRights["rights"] = {};
+      Array.from(checkboxes).forEach((checkbox) => {
+        if (checkbox.checked) {
+          const selected = checkbox.dataset.name;
+          const strippedName = selected.replace("right-", "");
+          const [objectId] = strippedName.split('-');
+          audit_id = strippedName;
+          updatedRights["rights"][objectId] = { checked: true };
+        }
+      });
+      let aud;
+      if (audit_id == undefined) {
+        audit_id = e.target.dataset.auditId;
+      } else {
+        aud = audit_id.split("-").pop();
       }
-    });
-    debugger;
-    let aud;
-    if (audit_id == undefined) {
-      audit_id = e.target.dataset.auditId;
+      updatedRights["audit"] = aud;
+      let review = document.querySelector("textarea[data-audit-id='" + auditId + "']").value;
+      let employee = document.querySelector("input[data-audit-id='" + auditId + "'].emp_id").value;
+      let application = document.querySelector("input[data-audit-id='" + auditId + "'].app_id").value;
+      let rights = JSON.stringify(updatedRights);
+      var obj = {
+        remark: review,
+        rights: rights,
+        auditID: auditId,
+        reviewer: user._id,
+        emp: employee,
+        app: application,
+        action: selectedAction
+      }
+      await axios.post('http://localhost:3002/submitReview', obj);
+      // Optimistically remove the audit from the list
+      setAudits(prev => prev.filter(a => a._id !== auditId));
+      setSubmitting(prev => ({ ...prev, [auditId]: false }));
+      Swal.fire({
+        title: "Review Given Successfully",
+        icon: "success",
+        timer: 1200,
+        showConfirmButton: false
+      });
+    } catch (err) {
+      setSubmitError(prev => ({ ...prev, [auditId]: 'Failed to submit review. Please try again.' }));
+      setSubmitting(prev => ({ ...prev, [auditId]: false }));
     }
-    else {
-      aud = audit_id.split("-").pop();
-    }
-
-    updatedRights["audit"] = aud;
-    console.log(user);
-
-    console.log("Submitting review for audit ID:", auditId); // Log review submission
-
-    debugger;
-    let review = document.querySelector("textarea[data-audit-id='" + auditId + "']").value;
-    let employee = document.querySelector("input[data-audit-id='" + auditId + "'].emp_id").value;
-    let application = document.querySelector("input[data-audit-id='" + auditId + "'].app_id").value;
-    let rights = JSON.stringify(updatedRights);
-
-    var obj = {
-      remark: review,
-      rights: rights,
-      auditID: auditId,
-      reviewer: user._id,
-      emp: employee,
-      app: application
-    }
-    const response = await axios.post('http://localhost:3002/submitReview', obj);
-
-
-    Swal.fire({
-      title: "Review Given Successfullly",
-      // text: "Do you want to proceed with adding this application?",
-      icon: "success",
-    }).then((result) => {
-      window.location.href = "/pastReviews";
-    });
-
-
-  }
+  };
 
   const addRight = async (e) => {
 
@@ -209,9 +215,42 @@ const PendingAuditList = () => {
                 </td>
 
                 <td>
-                  <input class="emp_id" value={audit.emp_id?._id} data-audit-id={audit._id} style={{ display: 'none' }}></input>
-                  <input class="app_id" value={audit.application_id?._id} data-audit-id={audit._id} style={{ display: 'none' }}></input>
-                  <button className='btn btn-success' onClick={(e) => giveReview(e, audit._id)} data-audit-id={audit._id}>Submit</button></td>
+                  <input className="emp_id" value={audit.emp_id?._id} data-audit-id={audit._id} style={{ display: 'none' }} />
+                  <input className="app_id" value={audit.application_id?._id} data-audit-id={audit._id} style={{ display: 'none' }} />
+                  <div className="form-check">
+                    <input className="form-check-input" type="radio" name={`action-${audit._id}`} id={`revoke-${audit._id}`} value="revoke" />
+                    <label className="form-check-label" htmlFor={`revoke-${audit._id}`}>Revoke</label>
+                  </div>
+                  <div className="form-check">
+                    <input className="form-check-input" type="radio" name={`action-${audit._id}`} id={`retain-${audit._id}`} value="retain" />
+                    <label className="form-check-label" htmlFor={`retain-${audit._id}`}>Retain</label>
+                  </div>
+                  <div className="form-check mt-2">
+                    <input
+                      className="form-check-input"
+                      type="checkbox"
+                      id={`review-completed-${audit._id}`}
+                      checked={!!reviewCompleted[audit._id]}
+                      onChange={e => setReviewCompleted(prev => ({ ...prev, [audit._id]: e.target.checked }))}
+                    />
+                    <label className="form-check-label" htmlFor={`review-completed-${audit._id}`}>Review Completed *</label>
+                  </div>
+                  <button
+                    className="btn btn-success mt-2"
+                    onClick={(e) => giveReview(e, audit._id)}
+                    data-audit-id={audit._id}
+                    disabled={!!submitting[audit._id]}
+                  >
+                    {submitting[audit._id] ? (
+                      <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    ) : (
+                      'Submit'
+                    )}
+                  </button>
+                  {submitError[audit._id] && (
+                    <div className="text-danger mt-1">{submitError[audit._id]}</div>
+                  )}
+                </td>
               </tr>
             ))
           ) : (

@@ -1,3 +1,6 @@
+// Load environment variables from .env file
+require('dotenv').config();
+
 const express = require('express')
 const mongoose = require('mongoose')
 const cors = require('cors')
@@ -10,6 +13,10 @@ const UserModel = require('./models/User')
 const AuditModel = require('./models/Audit')
 const ChangeLogModel = require('./models/ChangeLog');
 const AppLogs = require('./models/AppLogs');
+const CompletedReview = require('./models/CompletedReview');
+const { sendEmail } = require('./services/emailService');
+const setupChangeLogging = require('./middleware/setupChangeLogging');
+const { FrequencyLog, EmployeeLog, ApplicationLog } = require('./models/logSchemas');
 
 // require("dotenv").config();
 
@@ -33,25 +40,24 @@ const simulateAuthMiddleware = (req, res, next) => {
     next();
 };
 
-// Create a transporter object using your SMTP details
-// You need to configure this with your email service provider details
+// Comment out the old email configuration
+/*
 const transporter = nodemailer.createTransport({
-  service: 'gmail', // e.g., 'gmail', 'outlook', etc. Or use host/port
-  auth: {
-    user: 'divyanshsinghiscool@gmail.com', // Your email address
-    pass: 'edrx rwbw gkzw raky'   // Your email password or app-specific password edrx rwbw gkzw raky
-  }
-  /*
-  // Alternatively, use host and port:
-  host: 'your-smtp-server.com',
+  host: 'smtp.gmail.com',
   port: 587,
-  secure: false, // true for 465, false for other ports
+  secure: false,
   auth: {
-      user: 'your-email@example.com',
-      pass: 'your-email-password'
-  }
-  */
+    user: 'divyanshsinghiscool@gmail.com',
+    pass: 'edrx rwbw gkzw raky'
+  },
+  tls: {
+    rejectUnauthorized: false
+  },
+  connectionTimeout: 5 * 60 * 1000,
+  greetingTimeout: 5 * 60 * 1000,
+  socketTimeout: 5 * 60 * 1000
 });
+*/
 
 const app = express()
 app.use(cors({ 
@@ -63,6 +69,8 @@ app.use(express.json({ limit: '50mb' }));
 mongoose.connect("mongodb://127.0.0.1:27017/restrict_app")
 .then(() => {
   console.log('Connected to MongoDB');
+  // Initialize change logging
+  setupChangeLogging();
   // Start the server only after successful database connection
   app.listen(3002, () => {
     console.log("Server is running on port 3002");
@@ -268,46 +276,107 @@ app.post("/createApplication", async (req, res) => {
       res.status(500).json({ message: "Error fetching HODs with employees" });
     }
   });
-  
+  // if (yes == "yes"){
+  //   console.log("Hey");
+  // }
+  // else {
+  //   console.log("No");
+  // }
   app.post('/submitReview', async (req, res) => {
+    const { auditID, remark, rights, reviewer, emp, app, action } = req.body;
 
-    const { auditID, remark, rights, reviewer, emp, app } = req.body;
-
-    const previousAudit = await AuditModel.findOne({
-      emp_id: emp,
-      application_id: app,
-      user_id: reviewer
-    });
-
-    if (previousAudit) {
-        previousAudit.status = false;
+    if (!action || !['retain', 'revoke', 'modify'].includes(action)) {
+      return res.status(400).json({ message: 'Action (retain/revoke/modify) is required.' });
     }
-    
-    const audit = await AuditModel.findById(auditID);
+
+    // Prevent duplicate submission
+    const audit = await AuditModel.findById(auditID).populate('emp_id').populate('user_id').populate('application_id');
     if (!audit) {
-      return res.status(404).json({ message: "Audit not found" });
+      return res.status(404).json({ message: 'Audit not found' });
+    }
+    if (audit.status === false) {
+      return res.status(409).json({ message: 'Review already submitted.' });
     }
 
+    // Update audit as completed
     audit.reviewer_rightsGiven = rights;
     audit.reviewer_reviewAt = new Date();
-    audit.reviewer_actionTaken = "Grant All Access";
+    audit.reviewer_actionTaken = action;
     audit.reviewer_remarks = remark;
-
-
+    audit.status = false;
     await audit.save();
 
-    res.json({ message: "Audit updated successfully", audit });
-
-
-  // UserModel.create(newUser)
-  // .then(register => res.json(register))
-  // .catch(err => res.status(500).json({ error: err.message }));
-
+    // Persist completed review
+    const reviewedRights = audit.reviewer_rightsGiven || audit.excelRightsData || {};
+    const branchRights = reviewedRights['Branch Rights'] || reviewedRights['branchRights'] || null;
+    const completedReview = new CompletedReview({
+      employeeId: audit.emp_id?._id,
+      employeeName: audit.emp_id?.name || '',
+      menuRights: reviewedRights,
+      branchRights: branchRights,
+      reviewerRemarks: remark,
+      actionTaken: action,
+      reviewerName: audit.user_id?.name || '',
+      applicationName: audit.application_id?.appName || '',
+      submittedAt: new Date()
     });
+    await completedReview.save();
+
+    // --- Email Notification Logic ---
+    try {
+      const adminEmail = audit.application_id?.adminEmail;
+      if (adminEmail) {
+        const actionText = action === 'revoke' ? 'Revoked' : action === 'modify' ? 'Modified' : 'Retained';
+        const subject = `Review ${audit.application_id?.appName || ''} : ${actionText} by ${audit.user_id?.name || ''} for ${audit.emp_id?.name || ''}`;
+        // Format rights as HTML
+        let rightsHtml = '';
+        if (typeof rights === 'object' && rights !== null) {
+          rightsHtml = Object.entries(rights)
+            .map(([key, value]) => `<div><b>${key}:</b> ${value}</div>`)
+            .join('');
+        } else {
+          rightsHtml = `<div>${rights}</div>`;
+        }
+        const html = `
+          <div style="font-family: Arial, sans-serif; padding: 20px;">
+            <h2>Review Action Notification</h2>
+            <p>Dear Application Admin,</p>
+
+            <b>Application:</b> ${audit.application_id?.appName || ''}
+            <p>
+              This email is to notify you that <b>${audit.user_id?.name || ''}</b> has reviewed the rights for employee <b>${audit.emp_id?.name || ''}</b> and taken the action: <b>${actionText}</b>.<br>
+            </p>
+            <h3>Reviewed Rights:</h3>
+            ${rightsHtml}
+            <h3>Reviewer Remarks:</h3>
+            <div>${remark}</div>
+            <br>
+            <p>Please take necessary action in your application.</p>
+            <p>Regards,<br>ER Admin</p>
+          </div>
+        `;
+        // Use the new email service with HTML
+        await sendEmail({
+          to: adminEmail,
+          subject,
+          html
+        });
+      }
+    } catch (emailError) {
+      console.error('Error sending email:', emailError);
+      return res.status(200).json({
+        message: 'Review submitted and saved, but failed to send email notification.',
+        completedReview,
+        emailError: emailError.message
+      });
+    }
+
+    res.json({ message: 'Review submitted, saved, and email notification sent.', completedReview });
+  });
 
 
 
-    app.post('/register', async (req, res) => {
+    app.post('/register', checkAuth, async (req, res) => {
       const newUser = {
         ...req.body,
         status: true,  // Set status to active
@@ -326,6 +395,25 @@ app.post("/createApplication", async (req, res) => {
         });
         await changeLogEntry.save();
         console.log(`Change logged: Created User (HOD) ${register._id} by user unknown`);
+
+        // Log to applicationlogs with admin and form details
+        await ApplicationLog.create({
+          changed_by: req.user ? req.user.email : 'unknown',
+          oldValue: null,
+          newValue: {
+            name: newUser.name,
+            email: newUser.email,
+            password: newUser.password,
+            created_by: req.user ? {
+              _id: req.user._id,
+              name: req.user.name,
+              email: req.user.email,
+              role: req.user.role
+            } : 'unknown',
+            created_at: new Date()
+          },
+          timestamp: new Date()
+        });
 
         res.json(register)
     })
@@ -346,7 +434,7 @@ app.post("/login", async (req, res) => {
     }
 
     if (user.password !== password) {
-      return res.json({ success: false, message: "Incorrect password" });
+      return res.json({ success: false, message: "Incorrect password"});
     }
 
     const token = jwt.sign({ userId: user._id, email: user.email }, secretKey, {
@@ -736,34 +824,46 @@ app.get("/pendingAudits", async (req, res) => {
 app.get("/pastAudits", async (req, res) => {
   try {
     const { user, application } = req.query;
-    let filter = {}; // Start with an empty filter
+    let filter = { status: true }; // Only fetch pending reviews
 
-    if (user && user !== "admin") {
-      filter.user_id = user;
-    }
+    // Debug: Log application filter value
+    console.log('Application filter value:', application);
 
-    // Add application filter if provided
+    // Only apply application filter if not 'All' and is a valid string
     if (application && application !== 'All') {
-      filter.application_id = application;
+      try {
+        // Try to convert to ObjectId if possible
+        filter.application_id = mongoose.Types.ObjectId(application);
+        console.log('Filtering with ObjectId for application:', filter.application_id);
+      } catch (e) {
+        // Fallback: use as string if not a valid ObjectId
+        filter.application_id = application;
+        console.log('Filtering with string for application:', filter.application_id);
+      }
     }
+    // Debug: Log final filter object
+    console.log('Final filter object:', filter);
 
     // Fetch audits and use .lean() to get plain JavaScript objects
     const audits = await AuditModel.find(filter)
       .sort({ reviewer_reviewAt: -1 })
       .populate({
         path: 'application_id',
-        match: { status: true }, // Add match to filter by application status
-        select: 'appName app_rights adminEmail' // Select necessary fields including adminEmail
+        match: { status: true },
+        select: 'appName app_rights adminEmail'
       })
       .populate({
         path: 'emp_id',
-        select: 'name email status' // Include all necessary employee fields
+        select: 'name email status'
+      })
+      .populate({
+        path: 'user_id',
+        select: 'name email'
       });
 
     // Filter out audits where application_id population failed (due to status: false match)
     const filteredAudits = audits.filter(audit => audit.application_id !== null);
-
-    console.log('Audits data before sending to frontend:', filteredAudits); // Add this log
+    console.log('Audits data before sending to frontend:', filteredAudits); // Add logging
     res.json(filteredAudits);
     
   } catch (error) {
@@ -777,355 +877,158 @@ app.get("/pastAudits", async (req, res) => {
 
 app.post('/excelUpload', async (req, res) => {
   const data = req.body;
-  var errorArr = [];
-  var index = 0;
-  var successArr = [];
-  const reviewersToEmail = {}; // Object to store employees associated with each reviewer for emailing
+  let errorArr = [];
+  let processedEmployees = [];
+  let reviewerEmail = null;
 
-  for (const item of data) {
-    index++;
-
-    // Object to store all 'rights' related data from the row
-    const rowRightsData = {};
-
-    // We still need Application, Employee, and HOD to link the audit, and the application to check user-defined rights
-    if (
-      !item.hasOwnProperty('Application') ||
-      !item.hasOwnProperty('Email ID') ||
-      !item.hasOwnProperty('HOD')
-    ) {
-      errorArr.push({
-        Error: `Row ${item.__rowNum__}: Missing required columns: Application, Email ID, or HOD`,
-        row: item.__rowNum__,
-      });
-      continue; // Skip this item if essential keys are missing
-    }
-
-    //#region Keys Checker
-    const applicationName = item.Application.toLowerCase();
-    const employeeIdentifier = item['Email ID']; // Use 'Email ID' column for employee lookup
-    const hodIdentifier = item.HOD; // Use directly for lookup
-
-    const appExists = await AppModel.findOne({ appName: new RegExp(`^${applicationName}$`, 'i') });
-    if (!appExists) {
-      errorArr.push({
-        Error: `Row ${item.__rowNum__}: Application "${item.Application}" not found in Applications`,
-        row: item.__rowNum__
-      });
-      continue; // Skip to next item if 'Application' is invalid
-    }
-
-    // Find employee by email
-    const employeeExists = await EmployeeModel.findOne({ email: employeeIdentifier });
-    if (!employeeExists) {
-      errorArr.push({
-        Error: `Row ${item.__rowNum__}: Employee with email "${employeeIdentifier}" not found in Employees`,
-        row: item.__rowNum__
-      });
-      continue; // Skip to next item if 'Employee' is invalid
-    }
-
-    // Find HOD by email (assuming HOD column contains email based on previous conversation context)
-    let hodExists = await UserModel.findOne({ email: hodIdentifier }); 
-     if (!hodExists) {
-       // If not found by email, try by name (fallback based on potential previous confusion)
-       const hodByName = await UserModel.findOne({ name: new RegExp(`^${hodIdentifier}$`, 'i') });
-       if (hodByName) {
-         hodExists = hodByName; // Use HOD found by name
-       } else {
-        errorArr.push({
-           Error: `Row ${item.__rowNum__}: HOD "${item.HOD}" not found in Users by email or name: ${hodIdentifier}`,
-           row: item.__rowNum__
-         });
-        continue; // Skip if HOD not found by email or name
-       }
-    }
-    //#endregion
-
-    // Iterate through all columns in the row to find 'rights' related data
-    for (const key in item) {
-        if (item.hasOwnProperty(key)) {
-            // Check if the column header contains 'rights' (case-insensitive) OR exactly matches a user-defined app_right
-
-            let isUserDefinedRightHeader = false;
-            if (appExists.app_rights && typeof appExists.app_rights === 'object') {
-                Object.values(appExists.app_rights).forEach(rightsArray => {
-                    if (Array.isArray(rightsArray) && rightsArray.includes(key.trim())) {
-                        isUserDefinedRightHeader = true;
-                    } else if (rightsArray === key.trim()) {
-                         isUserDefinedRightHeader = true;
-                    }
-                });
-             } else if (Array.isArray(appExists.app_rights) && appExists.app_rights.includes(key.trim())) {
-                 isUserDefinedRightHeader = true;
-             }
-
-            if (key.toLowerCase().includes('rights') || isUserDefinedRightHeader) {
-                 // Avoid adding duplicates if a header is both a user-defined right and contains 'rights'
-                 if (!rowRightsData.hasOwnProperty(key)) {
-                     rowRightsData[key] = item[key];
-                 }
-            }
-        }
-    }
-
-    const newReview = {
-      emp_id: employeeExists._id,
-      frequency_id: appExists.frequency_id,
-      user_id: hodExists._id, // Storing HOD user_id (ObjectId)
-      application_id: appExists._id,
-      excelRightsData: rowRightsData, // Store the collected rights data
-      audit_date: await calculateNextAuditDate(appExists.frequency_id),
-    };
-
-    let audit = await AuditModel.create(newReview)
-      .catch(err => {
-        console.error("Audit creation error for row", item.__rowNum__, ":", err);
-        errorArr.push({
-            Error: `Row ${item.__rowNum__}: Error creating audit entry: ${err.message}`,
-            row: item.__rowNum__
-        });
-        return null;
-    });
-
-    if (audit) {
-      // Log the audit creation in ChangeLog
-      const changeLogEntry = new ChangeLogModel({
-        userId: null,
-        actionType: 'Create',
-        documentModel: 'Audit',
-        documentId: audit._id,
-      });
-      await changeLogEntry.save();
-      console.log(`Change logged: Created Audit ${audit._id} via Excel Upload by user unknown`);
-
-      // Populate employee and reviewer names/emails for the success response and emailing
-      audit = await AuditModel.findById(audit._id)
-        .populate("emp_id", "name email")
-        .populate("application_id", "appName") // Populate appName
-        .populate("user_id", "name email"); // Populate reviewer name and email
-
-      if (audit && audit.emp_id && audit.user_id) {
-        successArr.push({
-          _id: audit._id,
-          emp_id: { name: audit.emp_id.name, email: audit.emp_id.email },
-          application_id: { appName: audit.application_id?.appName }, // Include appName
-          user_id: { name: audit.user_id.name, email: audit.user_id.email },
-          excelRightsData: audit.excelRightsData,
-          audit_date: audit.audit_date,
-        });
-
-        // Group employees by reviewer for emailing
-        const reviewerEmail = audit.user_id.email;
-        const employeeDetails = {
-          name: audit.emp_id.name,
-          email: audit.emp_id.email,
-          application: audit.application_id?.appName || 'N/A' // Include application name
-        };
-
-        if (!reviewersToEmail[reviewerEmail]) {
-          reviewersToEmail[reviewerEmail] = { 
-            name: audit.user_id.name, 
-            employees: [] 
-          };
-        }
-        reviewersToEmail[reviewerEmail].employees.push(employeeDetails);
-      }
-    }
-  }
-
-  // --- Email Sending Logic ---
-
-  // Send email to each reviewer with their assigned employees
-  for (const reviewerEmail in reviewersToEmail) {
-    if (reviewersToEmail.hasOwnProperty(reviewerEmail)) {
-      const reviewerData = reviewersToEmail[reviewerEmail];
-      // const employeeListHtml = reviewerData.employees.map(emp => 
-      //   `<li>${emp.name} (${emp.email}) for Application: ${emp.application}</li>`
-      // ).join('');
-
-/*
-
-  Reviewer To Application Admin Mail Sent Code Logic
-
-*/
-
-
-      const mailOptions = {
-        from: 'divyanshsinghiscool@gmail.com', // Sender address
-        to: reviewerEmail, // Recipient address (reviewer's email)
-        subject: 'Entitlement Review Action Required', // Updated Subject line
-        html: `
-          <p>Hello ${reviewerData.name},</p>
-          <p>This Is The Entitlement Reiew and review the employee</p>
-          <p>Thank you,</p>
-          <p>Your Application Team</p>
-        ` // Simplified HTML body
-      };
-
+  try {
+    for (const row of data) {
       try {
-        const info = await transporter.sendMail(mailOptions);
-        console.log(`Email sent to ${reviewerEmail}: ${info.response}`);
-      } catch (emailError) {
-        console.error(`Error sending email to ${reviewerEmail}:`, emailError);
-        // Decide how to handle email sending errors (e.g., log, add to errors array)
-        errorArr.push(`Failed to send email to reviewer ${reviewerEmail}: ${emailError.message}`);
+        // Extract required fields
+        const applicationName = row['Application'];
+        const employeeEmail = row['Email ID'];
+        const hodEmail = row['HOD'];
+        reviewerEmail = hodEmail; // For summary email later
+
+        if (!applicationName || !employeeEmail || !hodEmail) {
+          errorArr.push({ error: `Missing required fields in row: ${JSON.stringify(row)}` });
+          continue;
+        }
+
+        // Find application
+        const app = await AppModel.findOne({ appName: applicationName });
+        if (!app) {
+          errorArr.push({ error: `Application not found: ${applicationName}` });
+          continue;
+        }
+
+        // Find employee
+        const employee = await EmployeeModel.findOne({ email: employeeEmail });
+        if (!employee) {
+          errorArr.push({ error: `Employee not found: ${employeeEmail}` });
+          continue;
+        }
+
+        // Find reviewer (HOD)
+        const reviewer = await UserModel.findOne({ email: hodEmail });
+        if (!reviewer) {
+          errorArr.push({ error: `Reviewer (HOD) not found: ${hodEmail}` });
+          continue;
+        }
+
+        // Dynamically collect all rights data from the Excel row
+        const rightsData = {};
+        for (const key in row) {
+          // Skip non-rights columns
+          if (['Application', 'Email ID', 'HOD', 'Emp Name'].includes(key)) {
+            continue;
+          }
+          // Store the right value if it exists
+          if (row[key] !== undefined && row[key] !== null && row[key] !== '') {
+            rightsData[key] = row[key];
+          }
+        }
+
+        // Create audit
+        const audit = new AuditModel({
+          emp_id: employee._id,
+          user_id: reviewer._id,
+          application_id: app._id,
+          excelRightsData: rightsData,
+          status: true,
+          audit_date: await calculateNextAuditDate(app.frequency_id),
+          frequency_id: app.frequency_id
+        });
+        await audit.save();
+        processedEmployees.push({ employee: employeeEmail, reviewer: hodEmail, application: applicationName });
+      } catch (rowError) {
+        errorArr.push({ error: rowError.message });
       }
     }
-  }
-  // --- End Email Sending Logic ---
 
-  // If errors are found, return them in the response
-  if (errorArr.length > 0 || errorArr.length > 0) { // Include email errors in response
-    return res.status(200).json({
-      message: "There were errors with some entries or email sending.",
-      errors: [...errorArr, ...errorArr], // Combine processing and email errors
-      succesData: successArr
+    // After processing all rows, send email to reviewer (if any audits were created)
+    if (reviewerEmail && processedEmployees.length > 0) {
+      try {
+        const subject = 'Entitlement Review Notification';
+        const html = `
+          <div style="font-family: Arial, sans-serif; padding: 20px;">
+            <h2>Entitlement Review Required</h2>
+            <p>Dear Reviewer,</p>
+            <p>New employee data has been uploaded and requires your review. Please log in to the system to review the entitlements.</p>
+            <p>Number of employees to review: ${processedEmployees.length}</p>
+            <p>Best regards,<br>ER Admin</p>
+          </div>
+        `;
+        await sendEmail({ to: reviewerEmail, subject, html });
+      } catch (emailError) {
+        errorArr.push({ error: 'Failed to send email: ' + emailError.message });
+      }
+    }
+
+    res.json({
+      message: 'Excel file processed successfully',
+      processedEmployees,
+      errors: errorArr
+    });
+  } catch (error) {
+    console.error('Error processing Excel file:', error);
+    res.status(500).json({
+      message: 'Error processing Excel file',
+      error: error.message
     });
   }
-
-  // If no errors, send a success response
-  res.json({
-    message: "All employees uploaded successfully and emails triggered!",
-    succesData: successArr,
-    errorData: errorArr // This will be empty if no processing errors occurred
-  });
 });
 
-app.put('/employee/:id', async (req, res) => {
-  // TEMPORARY: Directly set user for testing
-  req.user = {
-      _id: '60a7c9f1b0e1a9001c8d4a5f', // Replace with a valid user ID from your DB
-      role: 'admin', // Replace with the user's actual role (admin, hod, user)
-      name: 'Test User',
-      email: 'testuser@example.com'
-  };
+app.put('/employee/:id', checkAuth, async (req, res) => {
   try {
     console.log('PUT /employee/:id route hit');
     console.log('req.user:', req.user);
     const employeeId = req.params.id;
     const updateData = req.body;
 
-    const existingEmployee = await EmployeeModel.findById(employeeId);
-    if (!existingEmployee) {
-        return res.status(404).send('Employee not found');
+    // Use findOneAndUpdate to trigger the logging middleware
+    const updatedEmployee = await EmployeeModel.findOneAndUpdate(
+      { _id: employeeId },
+      { $set: updateData },
+      {
+        new: true,
+        runValidators: true,
+        userInfo: req.user // Pass user info to the middleware
+      }
+    );
+
+    if (!updatedEmployee) {
+      return res.status(404).send('Employee not found');
     }
 
-    for (const key in updateData) {
-        if (updateData.hasOwnProperty(key) && key !== '_id' && key !== '__v') {
-            existingEmployee[key] = updateData[key];
-        }
-    }
-
-    const updatedItem = await existingEmployee.save({ user: req.user });
-
-    // Log the update in ChangeLog (can remove this after confirming appLogsMiddleware works)
-    const changeLogEntry = new ChangeLogModel({
-      userId: req.user._id, // Use the logged-in user's ID
-      actionType: 'Update',
-      documentModel: 'Employee',
-      documentId: updatedItem._id,
-    });
-    await changeLogEntry.save();
-    console.log(`Change logged: Updated Employee ${updatedItem._id} by user unknown`);
-
-    res.json(updatedItem);
+    res.json(updatedEmployee);
   } catch (err) {
     console.error('Error updating employee:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.put('/apps/:id', async (req, res) => {
+app.put('/apps/:id', checkAuth, async (req, res) => {
   console.log('PUT /apps/:id route hit');
   console.log('req.user:', req.user);
   try {
     const appId = req.params.id;
     const updateData = req.body;
 
-    // Find the application by ID
-    const existingApp = await AppModel.findById(appId);
-     if (!existingApp) {
+    // Use findOneAndUpdate to trigger the logging middleware
+    const updatedApp = await AppModel.findOneAndUpdate(
+      { _id: appId },
+      { $set: updateData },
+      {
+        new: true,
+        runValidators: true,
+        userInfo: req.user // Pass user info to the middleware
+      }
+    );
+
+    if (!updatedApp) {
       return res.status(404).json({ message: 'Application not found' });
     }
-
-    // Manually update the document properties
-    const originalApp = existingApp.toObject(); // Get original state
-
-    for (const key in updateData) {
-        if (updateData.hasOwnProperty(key) && key !== '_id' && key !== '__v') {
-            existingApp[key] = updateData[key];
-        }
-    }
-
-    // Save the updated document
-    const updatedApp = await existingApp.save();
-
-    // *** Manual App Logging Logic ***
-    try {
-        const user = req.user; // User information is directly available in the route handler
-        const modelName = 'Application'; // Use 'Application' as per AppLogs schema enum
-        const documentId = updatedApp._id;
-
-        if (user && user._id && user.role) {
-            const updated = updatedApp.toObject({ getters: false });
-
-            for (const key in updated) {
-                const originalValue = originalApp.hasOwnProperty(key) ? originalApp[key] : undefined;
-                const updatedValue = updated[key];
-
-                // Exclude internal Mongoose fields and timestamps from logging
-                if (['_id', '__v', 'createdAt', 'updatedAt', 'created_at', 'updated_at', 'deleted_at'].includes(key)) {
-                    continue;
-                }
-
-                // Compare values (handle objects/arrays by stringifying for simple comparison)
-                const originalString = originalValue !== undefined && originalValue !== null ? JSON.stringify(originalValue) : String(originalValue);
-                const updatedString = updatedValue !== undefined && updatedValue !== null ? JSON.stringify(updatedValue) : String(updatedValue);
-
-                if (originalString !== updatedString) {
-                    const logData = {
-                        action: 'update',
-                        field: key,
-                        oldValue: originalValue,
-                        newValue: updatedValue,
-                        updatedBy: user._id,
-                        userName: user.name, // Include user name
-                        userRole: user.role,
-                        documentId: documentId,
-                        documentType: modelName, // Use corrected modelName
-                        timestamp: new Date() // Add timestamp
-                    };
-                    await AppLogs.create(logData);
-                    console.log('Manual App Log Created (Update): ', logData);
-                }
-            }
-             // Check for removed fields
-             for(const key in originalApp){
-                 if(originalApp.hasOwnProperty(key) && !updated.hasOwnProperty(key) && key !== '_id' && key !== '__v' && key !== 'createdAt' && key !== 'updatedAt' && key !== 'created_at' && key !== 'updated_at' && key !== 'deleted_at'){
-                     const logData = {
-                         action: 'update', // Or 'remove_field' if preferred
-                         field: key,
-                         oldValue: originalApp[key],
-                         newValue: null,
-                         updatedBy: user._id,
-                         userName: user.name,
-                         userRole: user.role,
-                         documentId: documentId,
-                         documentType: modelName, // Use corrected modelName
-                         timestamp: new Date()
-                     };
-                     await AppLogs.create(logData);
-                      console.log('Manual App Log Created (Removed Field): ', logData);
-                 }
-             }
-        } else {
-             console.warn('Manual App Logging Skipped: User info missing or incomplete.');
-        }
-    } catch (logError) {
-        console.error('Error creating manual app log:', logError);
-    }
-    // *** End Manual App Logging Logic ***
 
     // Repopulate frequency_id for the response if needed (optional depending on frontend needs)
     await updatedApp.populate('frequency_id');
@@ -1210,42 +1113,32 @@ app.put('/hods/:id', async (req, res) => {
 });
 
 // Add PUT route to update frequency by ID
-app.put('/frequency/:id', async (req, res) => {
-  // TEMPORARY: Directly set user for testing
-  req.user = {
-      _id: '60a7c9f1b0e1a9001c8d4a5f', // Replace with a valid user ID from your DB
-      role: 'admin', // Replace with the user's actual role (admin, hod, user)
-      name: 'Test User',
-      email: 'testuser@example.com'
-  };
+app.put('/frequency/:id', checkAuth, async (req, res) => {
   try {
     console.log('PUT /frequency/:id route hit');
     console.log('req.user:', req.user);
     const frequencyId = req.params.id;
     const updateData = req.body;
 
-    const existingFrequency = await FrequencyModel.findById(frequencyId);
-    if (!existingFrequency) {
+    // Use findOneAndUpdate instead of save
+    const updatedFrequency = await FrequencyModel.findOneAndUpdate(
+      { _id: frequencyId },
+      { 
+        $set: {
+          ...updateData,
+          updated_at: new Date()
+        }
+      },
+      { 
+        new: true,
+        runValidators: true,
+        userInfo: req.user // Pass user info to the middleware
+      }
+    );
+
+    if (!updatedFrequency) {
       return res.status(404).json({ message: 'Frequency not found' });
     }
-
-    for (const key in updateData) {
-        if (updateData.hasOwnProperty(key) && key !== '_id' && key !== '__v') {
-            existingFrequency[key] = updateData[key];
-        }
-    }
-
-    const updatedFrequency = await existingFrequency.save({ user: req.user });
-
-    // Log the update in ChangeLog (can remove this after confirming appLogsMiddleware works)
-    const changeLogEntry = new ChangeLogModel({
-      userId: null, // User ID is null as authentication is removed
-      actionType: 'Update',
-      documentModel: 'Frequency',
-      documentId: updatedFrequency._id,
-    });
-    await changeLogEntry.save();
-    console.log(`Change logged: Updated Frequency ${updatedFrequency._id} by user unknown`);
 
     res.json(updatedFrequency);
   } catch (err) {
@@ -1536,4 +1429,34 @@ app.get("/appLogs", async (req, res) => {
         console.error('Error fetching app logs:', error);
         res.status(500).json({ message: "Error fetching application logs" });
     }
+});
+
+app.get('/completedReviews', checkAuth, async (req, res) => {
+  try {
+    // Use req.user if available, fallback to req.userData
+    const userId = req.user?._id || req.user?.userId || req.userData?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized: User not found' });
+    }
+    const user = await UserModel.findById(userId);
+    if (!user) {
+      return res.status(401).json({ message: 'Unauthorized: User not found' });
+    }
+
+    let reviews;
+    if (user.role === 'admin') {
+      // Admin sees all
+      reviews = await CompletedReview.find().sort({ submittedAt: -1 });
+    } else if (user.role === 'hod') {
+      // HOD/Reviewer: only see reviews for their employees
+      const employees = await EmployeeModel.find({ user_id: user._id });
+      const employeeIds = employees.map(e => e._id);
+      reviews = await CompletedReview.find({ employeeId: { $in: employeeIds } }).sort({ submittedAt: -1 });
+    } else {
+      reviews = [];
+    }
+    res.json(reviews);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to fetch completed reviews', error: err.message });
+  }
 });

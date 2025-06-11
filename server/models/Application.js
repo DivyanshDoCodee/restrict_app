@@ -1,6 +1,5 @@
 const mongoose = require('mongoose');
-const auditMiddleware = require('../middleware/auditMiddleware');
-const appLogsMiddleware = require('../middleware/appLogsMiddleware');
+const createChangeLoggingMiddleware = require('../middleware/changeLogging');
 
 // Define the schema for the app
 const AppSchema = new mongoose.Schema({
@@ -55,9 +54,8 @@ const AppSchema = new mongoose.Schema({
     }, 
 });
 
-// Apply both middleware
-auditMiddleware(AppSchema);
-appLogsMiddleware(AppSchema);
+// Attach the change logging middleware
+AppSchema.pre('findOneAndUpdate', createChangeLoggingMiddleware('application'));
 
 // Create and export the model
 const App = mongoose.model('App', AppSchema);

@@ -142,7 +142,12 @@ function App() {
     if (!editingApp) return;
 
     try {
-      const response = await axios.put(`http://localhost:3002/apps/${editingApp._id}`, editForm);
+      const token = localStorage.getItem('token');
+      const response = await axios.put(`http://localhost:3002/apps/${editingApp._id}`, editForm, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
       // Re-fetch all apps to ensure populated data is correct after update
       fetchApps();
 
@@ -169,9 +174,13 @@ function App() {
   const handleStatusChange = async (app) => {
     const newStatus = !app.status; // Toggle the current status
     try {
+      const token = localStorage.getItem('token');
       // Send PUT request to update the application status
-      await axios.put(`http://localhost:3002/apps/${app._id}/status`, { status: newStatus });
-      
+      await axios.put(`http://localhost:3002/apps/${app._id}/status`, { status: newStatus }, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
       // Update the local state to reflect the status change
       setApps(apps.map(a => 
         a._id === app._id ? { ...a, status: newStatus } : a
